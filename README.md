@@ -4,7 +4,7 @@
 
 ---
 
-## Project Description
+### Project Description
 
 > TODO:
 > Describe the purpose of this project in your own words.
@@ -13,7 +13,11 @@
 > - What problem this project solves
 > - What the machine learning pipeline does
 > - What models are used
+## Project Overview
+This project addresses customer churn prediction for a credit card business. The goal is to identify customers who are likely to stop using the service, allowing the business to take proactive retention measures before those customers leave.
 
+## Problem statement
+Credit card customer churn occurs when customers stop using or leave the bank’s credit card service. Predicting churn helps the business identify high-risk customers early and take targeted actions to improve retention.
 ---
 
 ## Files and Data Description
