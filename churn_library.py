@@ -25,6 +25,7 @@ RESULTS_DIR = Path("./images/results")
 MODELS_DIR = Path("./models")
 DATA_PATH = Path("./data/bank_data.csv")
 
+
 def create_output_directories() -> None:
     """
     Create output directories used by the project.
@@ -37,6 +38,7 @@ def create_output_directories() -> None:
     for directory in [EDA_DIR, RESULTS_DIR, MODELS_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
 
+
 def import_data(pth: Path) -> pd.DataFrame:
     """
     Return a dataframe for the csv found at pth.
@@ -46,11 +48,12 @@ def import_data(pth: Path) -> pd.DataFrame:
     output:
             df: pandas dataframe
     """
-    
+
     df = pd.read_csv(pth)
     df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
     df.columns = df.columns.str.lower()
     return df
+
 
 def standardize_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -79,6 +82,8 @@ def get_missing_value_report(df: pd.DataFrame) -> pd.Series:
         Series containing missing-value counts by column.
     """
     return df.isna().sum()
+
+
 def add_churn_column(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add a binary churn target column.
@@ -104,7 +109,9 @@ def add_churn_column(df: pd.DataFrame) -> pd.DataFrame:
     if data["churn"].isna().any():
         raise ValueError("Unexpected values found in attrition_flag.")
 
-    return data      
+    return data
+
+
 def split_data(
     df: pd.DataFrame,
     response: str,
@@ -136,6 +143,7 @@ def split_data(
         stratify=df[response],
     )
     return train_df, test_df
+
 
 def perform_eda(df: pd.DataFrame) -> None:
     """
@@ -192,6 +200,7 @@ def perform_eda(df: pd.DataFrame) -> None:
     plt.savefig(EDA_DIR / "correlation_heatmap.png")
     plt.close()
 
+
 def fit_missing_value_imputer(df: pd.DataFrame) -> dict:
     """
     Calculate missing-value fill values from a dataframe.
@@ -206,7 +215,8 @@ def fit_missing_value_imputer(df: pd.DataFrame) -> dict:
         Dictionary containing numerical medians and categorical modes.
     """
     numeric_columns = df.select_dtypes(include="number").columns
-    categorical_columns = df.select_dtypes(include=["object", "category"]).columns
+    categorical_columns = df.select_dtypes(
+        include=["object", "category"]).columns
 
     numeric_fill_values = df[numeric_columns].median().to_dict()
 
@@ -251,6 +261,7 @@ def apply_missing_value_imputer(
 
     return data
 
+
 def fit_target_encoder(
     train_df: pd.DataFrame,
     category_lst: list[str],
@@ -282,7 +293,8 @@ def fit_target_encoder(
         if category not in train_df.columns:
             raise KeyError(f"Categorical column not found: {category}")
 
-        category_stats = train_df.groupby(category)[response].agg(["mean", "count"])
+        category_stats = train_df.groupby(
+            category)[response].agg(["mean", "count"])
 
         smoothed_encoding = (
             category_stats["count"] * category_stats["mean"]
@@ -291,7 +303,9 @@ def fit_target_encoder(
 
         encodings[category] = smoothed_encoding
 
-    return encodings, global_mean    
+    return encodings, global_mean
+
+
 def apply_target_encoder(
     df: pd.DataFrame,
     encodings: dict[str, pd.Series],
@@ -321,6 +335,7 @@ def apply_target_encoder(
         data[encoded_column] = data[encoded_column].fillna(global_mean)
 
     return data
+
 
 def perform_feature_engineering(
     train_df: pd.DataFrame,
@@ -389,24 +404,17 @@ def perform_feature_engineering(
 
     return x_train, x_test, y_train, y_test
 
+
 def classification_report_image(
-    y_train: pd.Series,
-    y_test: pd.Series,
-    y_train_preds_lr: pd.Series,
-    y_train_preds_rf: pd.Series,
-    y_test_preds_lr: pd.Series,
-    y_test_preds_rf: pd.Series,
+    y_true: dict[str, pd.Series],
+    predictions: dict[str, pd.Series],
 ) -> None:
     """
     Save classification reports as an image.
 
     Args:
-        y_train: True training labels.
-        y_test: True testing labels.
-        y_train_preds_lr: Logistic regression predictions on training data.
-        y_train_preds_rf: Random forest predictions on training data.
-        y_test_preds_lr: Logistic regression predictions on testing data.
-        y_test_preds_rf: Random forest predictions on testing data.
+        y_true: Dictionary containing true train and test labels.
+        predictions: Dictionary containing model predictions.
 
     Returns:
         None.
@@ -415,20 +423,20 @@ def classification_report_image(
 
     reports = {
         "Logistic Regression Train": classification_report(
-            y_train,
-            y_train_preds_lr,
+            y_true["train"],
+            predictions["lr_train"],
         ),
         "Logistic Regression Test": classification_report(
-            y_test,
-            y_test_preds_lr,
+            y_true["test"],
+            predictions["lr_test"],
         ),
         "Random Forest Train": classification_report(
-            y_train,
-            y_train_preds_rf,
+            y_true["train"],
+            predictions["rf_train"],
         ),
         "Random Forest Test": classification_report(
-            y_test,
-            y_test_preds_rf,
+            y_true["test"],
+            predictions["rf_test"],
         ),
     }
 
@@ -449,7 +457,8 @@ def classification_report_image(
     plt.axis("off")
     plt.tight_layout()
     plt.savefig(RESULTS_DIR / "classification_report.png")
-    plt.close() 
+    plt.close()
+
 
 def feature_importance_plot(
     model: RandomForestClassifier,
@@ -484,7 +493,8 @@ def feature_importance_plot(
     plt.ylabel("Feature")
     plt.tight_layout()
     plt.savefig(output_pth)
-    plt.close()   
+    plt.close()
+
 
 def train_models(
     x_train: pd.DataFrame,
@@ -529,14 +539,17 @@ def train_models(
     joblib.dump(logistic_model, MODELS_DIR / "logistic_model.pkl")
     joblib.dump(random_forest_model, MODELS_DIR / "random_forest_model.pkl")
 
-    classification_report_image(
-        y_train,
-        y_test,
-        y_train_preds_lr,
-        y_train_preds_rf,
-        y_test_preds_lr,
-        y_test_preds_rf,
-    )
+    y_true = {
+        "train": y_train,
+        "test": y_test,
+    }
+    predictions = {
+        "lr_train": y_train_preds_lr,
+        "lr_test": y_test_preds_lr,
+        "rf_train": y_train_preds_rf,
+        "rf_test": y_test_preds_rf,
+    }
+    classification_report_image(y_true, predictions)
 
     feature_importance_plot(
         random_forest_model,
@@ -564,17 +577,4 @@ def train_models(
     plt.title("ROC Curves")
     plt.tight_layout()
     plt.savefig(RESULTS_DIR / "roc_curves.png")
-    plt.close()            
-
-
-
-
-
-
-
-
-
-
-
-
-
+    plt.close()
