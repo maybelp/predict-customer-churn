@@ -1,10 +1,10 @@
 """Tests for the customer churn prediction library."""
 
+import os
 from pathlib import Path
 
 import pandas as pd
 import pytest
-
 from sklearn.ensemble import RandomForestClassifier
 
 import churn_library as cl
@@ -39,6 +39,42 @@ def make_feature_dataframe() -> pd.DataFrame:
             "churn": [0, 1, 0, 1],
         }
     )
+
+
+def test_configure_environment_sets_qt_platform(monkeypatch):
+    """Test that configure_environment sets QT_QPA_PLATFORM if missing."""
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+
+    cl.configure_environment()
+
+    assert os.environ["QT_QPA_PLATFORM"] == "offscreen"
+
+
+def test_configure_environment_does_not_override_existing_qt_platform(
+    monkeypatch,
+):
+    """Test that configure_environment preserves existing QT_QPA_PLATFORM."""
+    monkeypatch.setenv("QT_QPA_PLATFORM", "existing_value")
+
+    cl.configure_environment()
+
+    assert os.environ["QT_QPA_PLATFORM"] == "existing_value"
+
+
+def test_create_output_directories_creates_expected_folders(
+    tmp_path,
+    monkeypatch,
+):
+    """Test that output directories are created."""
+    monkeypatch.setattr(cl, "EDA_DIR", tmp_path / "eda")
+    monkeypatch.setattr(cl, "RESULTS_DIR", tmp_path / "results")
+    monkeypatch.setattr(cl, "MODELS_DIR", tmp_path / "models")
+
+    cl.create_output_directories()
+
+    assert cl.EDA_DIR.exists()
+    assert cl.RESULTS_DIR.exists()
+    assert cl.MODELS_DIR.exists()
 
 
 def test_import_data_returns_dataframe():
@@ -99,6 +135,14 @@ def test_add_churn_column_creates_binary_target():
     assert result["churn"].tolist() == [0, 1, 0]
 
 
+def test_add_churn_column_raises_error_for_missing_attrition_flag():
+    """Test that add_churn_column raises KeyError if attrition_flag is missing."""
+    df = pd.DataFrame({"customer_age": [45, 50]})
+
+    with pytest.raises(KeyError):
+        cl.add_churn_column(df)
+
+
 def test_add_churn_column_raises_error_for_unexpected_label():
     """Test that unexpected attrition labels raise ValueError."""
     df = pd.DataFrame(
@@ -136,6 +180,50 @@ def test_split_data_raises_error_for_missing_response():
 
     with pytest.raises(KeyError):
         cl.split_data(df, response="churn")
+
+
+def test_perform_eda_saves_expected_figures(tmp_path, monkeypatch):
+    """Test that perform_eda saves expected EDA figures."""
+    monkeypatch.setattr(cl, "EDA_DIR", tmp_path / "eda")
+    monkeypatch.setattr(cl, "RESULTS_DIR", tmp_path / "results")
+    monkeypatch.setattr(cl, "MODELS_DIR", tmp_path / "models")
+
+    df = pd.DataFrame(
+        {
+            "churn": [0, 1, 0, 1],
+            "customer_age": [45, 49, 51, 40],
+            "marital_status": ["Married", "Single", "Married", "Unknown"],
+            "total_trans_ct": [42, 33, 20, 20],
+            "credit_limit": [12691.0, 8256.0, 3418.0, 3313.0],
+        }
+    )
+
+    cl.perform_eda(df)
+
+    assert (cl.EDA_DIR / "churn_distribution.png").exists()
+    assert (cl.EDA_DIR / "customer_age_distribution.png").exists()
+    assert (cl.EDA_DIR / "marital_status_distribution.png").exists()
+    assert (cl.EDA_DIR / "total_trans_ct_distribution.png").exists()
+    assert (cl.EDA_DIR / "correlation_heatmap.png").exists()
+
+
+def test_perform_eda_raises_error_without_churn_column(tmp_path, monkeypatch):
+    """Test that perform_eda requires a prepared dataframe with churn."""
+    monkeypatch.setattr(cl, "EDA_DIR", tmp_path / "eda")
+    monkeypatch.setattr(cl, "RESULTS_DIR", tmp_path / "results")
+    monkeypatch.setattr(cl, "MODELS_DIR", tmp_path / "models")
+
+    df = pd.DataFrame(
+        {
+            "customer_age": [45, 49, 51, 40],
+            "marital_status": ["Married", "Single", "Married", "Unknown"],
+            "total_trans_ct": [42, 33, 20, 20],
+            "credit_limit": [12691.0, 8256.0, 3418.0, 3313.0],
+        }
+    )
+
+    with pytest.raises(ValueError):
+        cl.perform_eda(df)
 
 
 def test_missing_value_imputer_fits_and_applies_train_values():
@@ -284,6 +372,32 @@ def test_perform_feature_engineering_returns_expected_outputs():
     assert y_test.tolist() == [0, 1, 0, 1]
 
 
+def test_perform_feature_engineering_accepts_custom_feature_columns():
+    """Test feature engineering can use a custom feature list."""
+    train_df = pd.DataFrame(
+        {
+            "customer_age": [45, 49, 51, 40],
+            "credit_limit": [12691.0, 8256.0, 3418.0, 3313.0],
+            "churn": [0, 1, 0, 1],
+        }
+    )
+    test_df = train_df.copy()
+
+    custom_features = ["customer_age", "credit_limit"]
+
+    x_train, x_test, y_train, y_test = cl.perform_feature_engineering(
+        train_df,
+        test_df,
+        response="churn",
+        feature_columns=custom_features,
+    )
+
+    assert x_train.columns.tolist() == custom_features
+    assert x_test.columns.tolist() == custom_features
+    assert y_train.tolist() == [0, 1, 0, 1]
+    assert y_test.tolist() == [0, 1, 0, 1]
+
+
 def test_perform_feature_engineering_raises_error_for_missing_feature():
     """Test feature engineering raises KeyError when a feature is missing."""
     train_df = make_feature_dataframe().drop(columns=["credit_limit"])
@@ -291,6 +405,58 @@ def test_perform_feature_engineering_raises_error_for_missing_feature():
 
     with pytest.raises(KeyError):
         cl.perform_feature_engineering(train_df, test_df, response="churn")
+
+
+def test_classification_report_image_saves_file(tmp_path):
+    """Test that classification_report_image saves a report image."""
+    y_train = pd.Series([0, 1, 0, 1])
+    y_test = pd.Series([0, 1])
+
+    model_predictions = {
+        "Logistic Regression": {
+            "train": pd.Series([0, 1, 0, 1]),
+            "test": pd.Series([0, 1]),
+        },
+        "Random Forest": {
+            "train": pd.Series([0, 1, 0, 1]),
+            "test": pd.Series([0, 1]),
+        },
+    }
+
+    output_path = tmp_path / "classification_report.png"
+
+    cl.classification_report_image(
+        y_train,
+        y_test,
+        model_predictions,
+        output_path,
+    )
+
+    assert output_path.exists()
+
+
+def test_classification_report_image_raises_error_for_missing_prediction_key(
+    tmp_path,
+):
+    """Test classification_report_image validates model prediction keys."""
+    y_train = pd.Series([0, 1, 0, 1])
+    y_test = pd.Series([0, 1])
+
+    model_predictions = {
+        "Logistic Regression": {
+            "train": pd.Series([0, 1, 0, 1]),
+        }
+    }
+
+    output_path = tmp_path / "classification_report.png"
+
+    with pytest.raises(KeyError, match="Each model must provide train and test"):
+        cl.classification_report_image(
+            y_train,
+            y_test,
+            model_predictions,
+            output_path,
+        )
 
 
 def test_feature_importance_plot_saves_file(tmp_path):
@@ -316,8 +482,44 @@ def test_feature_importance_plot_saves_file(tmp_path):
     assert output_path.exists()
 
 
+def test_plot_roc_curves_saves_file(tmp_path):
+    """Test that plot_roc_curves saves a ROC curve image."""
+    x_train = pd.DataFrame(
+        {
+            "feature_one": [0.0, 1.0, 0.2, 0.8, 0.1, 0.9],
+            "feature_two": [1.0, 0.0, 0.8, 0.2, 0.9, 0.1],
+        }
+    )
+    y_train = pd.Series([0, 1, 0, 1, 0, 1])
+
+    x_test = pd.DataFrame(
+        {
+            "feature_one": [0.05, 0.95],
+            "feature_two": [0.95, 0.05],
+        }
+    )
+    y_test = pd.Series([0, 1])
+
+    model = RandomForestClassifier(
+        n_estimators=10,
+        random_state=42,
+    )
+    model.fit(x_train, y_train)
+
+    output_path = tmp_path / "roc_curves.png"
+
+    cl.plot_roc_curves(
+        {"Random Forest": model},
+        x_test,
+        y_test,
+        output_path,
+    )
+
+    assert output_path.exists()
+
+
 def test_train_models_saves_models_and_images(tmp_path, monkeypatch):
-    """Test that train_models saves model and evaluation artifacts."""
+    """Test that train_models returns models and saves evaluation artifacts."""
     monkeypatch.setattr(cl, "EDA_DIR", tmp_path / "eda")
     monkeypatch.setattr(cl, "RESULTS_DIR", tmp_path / "results")
     monkeypatch.setattr(cl, "MODELS_DIR", tmp_path / "models")
@@ -338,77 +540,15 @@ def test_train_models_saves_models_and_images(tmp_path, monkeypatch):
     )
     y_test = pd.Series([0, 1])
 
-    cl.train_models(x_train, x_test, y_train, y_test)
+    models = cl.train_models(x_train, x_test, y_train, y_test)
+
+    assert "logistic_model" in models
+    assert "random_forest_model" in models
+    assert hasattr(models["logistic_model"], "predict")
+    assert hasattr(models["random_forest_model"], "predict")
 
     assert (cl.MODELS_DIR / "logistic_model.pkl").exists()
     assert (cl.MODELS_DIR / "random_forest_model.pkl").exists()
     assert (cl.RESULTS_DIR / "classification_report.png").exists()
     assert (cl.RESULTS_DIR / "feature_importance.png").exists()
     assert (cl.RESULTS_DIR / "roc_curves.png").exists()
-
-
-def test_create_output_directories_creates_expected_folders(
-        tmp_path, monkeypatch):
-    """Test that output directories are created."""
-    monkeypatch.setattr(cl, "EDA_DIR", tmp_path / "eda")
-    monkeypatch.setattr(cl, "RESULTS_DIR", tmp_path / "results")
-    monkeypatch.setattr(cl, "MODELS_DIR", tmp_path / "models")
-
-    cl.create_output_directories()
-
-    assert cl.EDA_DIR.exists()
-    assert cl.RESULTS_DIR.exists()
-    assert cl.MODELS_DIR.exists()
-
-
-def test_perform_eda_saves_expected_figures(tmp_path, monkeypatch):
-    """Test that perform_eda saves expected EDA figures."""
-    monkeypatch.setattr(cl, "EDA_DIR", tmp_path / "eda")
-    monkeypatch.setattr(cl, "RESULTS_DIR", tmp_path / "results")
-    monkeypatch.setattr(cl, "MODELS_DIR", tmp_path / "models")
-
-    df = pd.DataFrame(
-        {
-            "attrition_flag": [
-                "Existing Customer",
-                "Attrited Customer",
-                "Existing Customer",
-                "Attrited Customer",
-            ],
-            "customer_age": [45, 49, 51, 40],
-            "marital_status": ["Married", "Single", "Married", "Unknown"],
-            "total_trans_ct": [42, 33, 20, 20],
-            "credit_limit": [12691.0, 8256.0, 3418.0, 3313.0],
-        }
-    )
-
-    cl.perform_eda(df)
-
-    assert (cl.EDA_DIR / "churn_distribution.png").exists()
-    assert (cl.EDA_DIR / "customer_age_distribution.png").exists()
-    assert (cl.EDA_DIR / "marital_status_distribution.png").exists()
-    assert (cl.EDA_DIR / "total_trans_ct_distribution.png").exists()
-    assert (cl.EDA_DIR / "correlation_heatmap.png").exists()
-
-
-def test_classification_report_image_saves_file(tmp_path, monkeypatch):
-    """Test that classification_report_image saves a report image."""
-    monkeypatch.setattr(cl, "EDA_DIR", tmp_path / "eda")
-    monkeypatch.setattr(cl, "RESULTS_DIR", tmp_path / "results")
-    monkeypatch.setattr(cl, "MODELS_DIR", tmp_path / "models")
-
-    y_true = {
-        "train": pd.Series([0, 1, 0, 1]),
-        "test": pd.Series([0, 1]),
-    }
-
-    predictions = {
-        "lr_train": pd.Series([0, 1, 0, 1]),
-        "lr_test": pd.Series([0, 1]),
-        "rf_train": pd.Series([0, 1, 0, 1]),
-        "rf_test": pd.Series([0, 1]),
-    }
-
-    cl.classification_report_image(y_true, predictions)
-
-    assert (cl.RESULTS_DIR / "classification_report.png").exists()
