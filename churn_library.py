@@ -8,8 +8,10 @@ classification models, evaluating model performance, and saving results.
 Author: Ligia Palomo
 Date created: 2026-06-01
 """
+
 import os
 from pathlib import Path
+
 import joblib
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -18,39 +20,88 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import RocCurveDisplay, classification_report
 from sklearn.model_selection import train_test_split
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
 
 EDA_DIR = Path("./images/eda")
 RESULTS_DIR = Path("./images/results")
 MODELS_DIR = Path("./models")
 DATA_PATH = Path("./data/bank_data.csv")
 
+CATEGORICAL_COLUMNS = [
+    "gender",
+    "education_level",
+    "marital_status",
+    "income_category",
+    "card_category",
+]
+
+EDA_PLOT_CONFIG = {
+    "churn": "count",
+    "customer_age": "hist",
+    "marital_status": "count",
+    "total_trans_ct": "hist",
+}
+
+MODEL_FEATURES = [
+    "customer_age",
+    "dependent_count",
+    "months_on_book",
+    "total_relationship_count",
+    "months_inactive_12_mon",
+    "contacts_count_12_mon",
+    "credit_limit",
+    "total_revolving_bal",
+    "avg_open_to_buy",
+    "total_amt_chng_q4_q1",
+    "total_trans_amt",
+    "total_trans_ct",
+    "total_ct_chng_q4_q1",
+    "avg_utilization_ratio",
+    "gender_churn",
+    "education_level_churn",
+    "marital_status_churn",
+    "income_category_churn",
+    "card_category_churn",
+]
+
+
+def configure_environment() -> None:
+    """
+    Configure environment variables needed for headless plotting.
+
+    Returns:
+        None.
+    """
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
 def create_output_directories() -> None:
     """
     Create output directories used by the project.
 
-    input:
-            None
-    output:
-            None
+    Returns:
+        None.
     """
     for directory in [EDA_DIR, RESULTS_DIR, MODELS_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
+
 
 def import_data(pth: Path) -> pd.DataFrame:
     """
     Return a dataframe for the csv found at pth.
 
-    input:
-            pth: a path to the csv
-    output:
-            df: pandas dataframe
+    Args:
+        pth: Path to the csv file.
+
+    Returns:
+        Pandas dataframe with unnamed columns removed and column names lowercased.
     """
-    
     df = pd.read_csv(pth)
     df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
     df.columns = df.columns.str.lower()
+
     return df
+
 
 def standardize_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -79,19 +130,25 @@ def get_missing_value_report(df: pd.DataFrame) -> pd.Series:
         Series containing missing-value counts by column.
     """
     return df.isna().sum()
+
+
 def add_churn_column(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add a binary churn target column.
 
     Args:
-        df: Input dataframe.
+        df: Input dataframe containing attrition_flag.
 
     Returns:
         Dataframe with churn column added.
 
     Raises:
+        KeyError: If attrition_flag is missing.
         ValueError: If attrition_flag contains unexpected values.
     """
+    if "attrition_flag" not in df.columns:
+        raise KeyError("Required column not found: attrition_flag")
+
     data = df.copy()
 
     churn_mapping = {
@@ -104,7 +161,9 @@ def add_churn_column(df: pd.DataFrame) -> pd.DataFrame:
     if data["churn"].isna().any():
         raise ValueError("Unexpected values found in attrition_flag.")
 
-    return data      
+    return data
+
+
 def split_data(
     df: pd.DataFrame,
     response: str,
@@ -135,14 +194,20 @@ def split_data(
         random_state=random_state,
         stratify=df[response],
     )
+
     return train_df, test_df
+
 
 def perform_eda(df: pd.DataFrame) -> None:
     """
-    Perform EDA on df and save figures.
+    Perform EDA on a prepared dataframe and save figures.
 
     Args:
-        df: pandas dataframe.
+        df: Prepared pandas dataframe containing a binary churn column.
+
+    Raises:
+        ValueError: If the dataframe does not contain the churn column.
+        KeyError: If a required plotting column is missing.
 
     Returns:
         None.
@@ -152,16 +217,20 @@ def perform_eda(df: pd.DataFrame) -> None:
     data = df.copy()
 
     if "churn" not in data.columns:
-        data = add_churn_column(data)
+        raise ValueError(
+            "perform_eda requires a prepared dataframe with a 'churn' column. "
+            "Call add_churn_column before perform_eda."
+        )
 
-    plot_config = {
-        "churn": "count",
-        "customer_age": "hist",
-        "marital_status": "count",
-        "total_trans_ct": "hist",
-    }
+    missing_columns = [
+        column for column in EDA_PLOT_CONFIG
+        if column not in data.columns
+    ]
 
-    for column, plot_type in plot_config.items():
+    if missing_columns:
+        raise KeyError(f"Missing EDA columns: {missing_columns}")
+
+    for column, plot_type in EDA_PLOT_CONFIG.items():
         plt.figure(figsize=(10, 6))
 
         if plot_type == "count":
@@ -192,6 +261,7 @@ def perform_eda(df: pd.DataFrame) -> None:
     plt.savefig(EDA_DIR / "correlation_heatmap.png")
     plt.close()
 
+
 def fit_missing_value_imputer(df: pd.DataFrame) -> dict:
     """
     Calculate missing-value fill values from a dataframe.
@@ -206,7 +276,9 @@ def fit_missing_value_imputer(df: pd.DataFrame) -> dict:
         Dictionary containing numerical medians and categorical modes.
     """
     numeric_columns = df.select_dtypes(include="number").columns
-    categorical_columns = df.select_dtypes(include=["object", "category"]).columns
+    categorical_columns = df.select_dtypes(
+        include=["object", "category"],
+    ).columns
 
     numeric_fill_values = df[numeric_columns].median().to_dict()
 
@@ -251,6 +323,7 @@ def apply_missing_value_imputer(
 
     return data
 
+
 def fit_target_encoder(
     train_df: pd.DataFrame,
     category_lst: list[str],
@@ -282,7 +355,9 @@ def fit_target_encoder(
         if category not in train_df.columns:
             raise KeyError(f"Categorical column not found: {category}")
 
-        category_stats = train_df.groupby(category)[response].agg(["mean", "count"])
+        category_stats = train_df.groupby(category)[response].agg(
+            ["mean", "count"],
+        )
 
         smoothed_encoding = (
             category_stats["count"] * category_stats["mean"]
@@ -291,7 +366,9 @@ def fit_target_encoder(
 
         encodings[category] = smoothed_encoding
 
-    return encodings, global_mean    
+    return encodings, global_mean
+
+
 def apply_target_encoder(
     df: pd.DataFrame,
     encodings: dict[str, pd.Series],
@@ -322,10 +399,12 @@ def apply_target_encoder(
 
     return data
 
+
 def perform_feature_engineering(
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
     response: str,
+    feature_columns: list[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
     """
     Select model features and separate train/test data into X and y.
@@ -334,6 +413,8 @@ def perform_feature_engineering(
         train_df: Training dataframe after cleaning and encoding.
         test_df: Testing dataframe after cleaning and encoding.
         response: Target column name.
+        feature_columns: Optional list of feature columns to use.
+            If None, MODEL_FEATURES is used.
 
     Returns:
         x_train: Training feature dataframe.
@@ -350,30 +431,10 @@ def perform_feature_engineering(
     if response not in test_df.columns:
         raise KeyError(f"Response column not found in test_df: {response}")
 
-    keep_cols = [
-        "customer_age",
-        "dependent_count",
-        "months_on_book",
-        "total_relationship_count",
-        "months_inactive_12_mon",
-        "contacts_count_12_mon",
-        "credit_limit",
-        "total_revolving_bal",
-        "avg_open_to_buy",
-        "total_amt_chng_q4_q1",
-        "total_trans_amt",
-        "total_trans_ct",
-        "total_ct_chng_q4_q1",
-        "avg_utilization_ratio",
-        "gender_churn",
-        "education_level_churn",
-        "marital_status_churn",
-        "income_category_churn",
-        "card_category_churn",
-    ]
+    selected_features = feature_columns or MODEL_FEATURES
 
-    missing_train_cols = set(keep_cols) - set(train_df.columns)
-    missing_test_cols = set(keep_cols) - set(test_df.columns)
+    missing_train_cols = set(selected_features) - set(train_df.columns)
+    missing_test_cols = set(selected_features) - set(test_df.columns)
 
     if missing_train_cols:
         raise KeyError(f"Missing columns in train_df: {missing_train_cols}")
@@ -381,80 +442,84 @@ def perform_feature_engineering(
     if missing_test_cols:
         raise KeyError(f"Missing columns in test_df: {missing_test_cols}")
 
-    x_train = train_df[keep_cols]
-    x_test = test_df[keep_cols]
+    x_train = train_df[selected_features]
+    x_test = test_df[selected_features]
 
     y_train = train_df[response]
     y_test = test_df[response]
 
     return x_train, x_test, y_train, y_test
 
+
 def classification_report_image(
     y_train: pd.Series,
     y_test: pd.Series,
-    y_train_preds_lr: pd.Series,
-    y_train_preds_rf: pd.Series,
-    y_test_preds_lr: pd.Series,
-    y_test_preds_rf: pd.Series,
+    model_predictions: dict[str, dict[str, pd.Series]],
+    output_path: Path,
 ) -> None:
     """
-    Save classification reports as an image.
+    Save classification reports for one or more trained models.
 
     Args:
-        y_train: True training labels.
-        y_test: True testing labels.
-        y_train_preds_lr: Logistic regression predictions on training data.
-        y_train_preds_rf: Random forest predictions on training data.
-        y_test_preds_lr: Logistic regression predictions on testing data.
-        y_test_preds_rf: Random forest predictions on testing data.
+        y_train: Training target labels.
+        y_test: Testing target labels.
+        model_predictions: Dictionary mapping model names to train/test predictions.
+        output_path: Path where the report image will be saved.
+
+    Raises:
+        KeyError: If a model is missing train or test predictions.
 
     Returns:
         None.
     """
-    create_output_directories()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    reports = {
-        "Logistic Regression Train": classification_report(
-            y_train,
-            y_train_preds_lr,
-        ),
-        "Logistic Regression Test": classification_report(
-            y_test,
-            y_test_preds_lr,
-        ),
-        "Random Forest Train": classification_report(
-            y_train,
-            y_train_preds_rf,
-        ),
-        "Random Forest Test": classification_report(
-            y_test,
-            y_test_preds_rf,
-        ),
+    required_prediction_keys = {"train", "test"}
+
+    missing_keys_by_model = {
+        model_name: required_prediction_keys - set(predictions)
+        for model_name, predictions in model_predictions.items()
+        if required_prediction_keys - set(predictions)
     }
 
-    report_text = "\n\n".join(
-        f"{title}\n{report}" for title, report in reports.items()
-    )
+    if missing_keys_by_model:
+        raise KeyError(
+            f"Each model must provide train and test predictions. "
+            f"Missing keys: {missing_keys_by_model}"
+        )
+
+    report_sections = []
+
+    for model_name, predictions in model_predictions.items():
+        train_report = classification_report(y_train, predictions["train"])
+        test_report = classification_report(y_test, predictions["test"])
+
+        report_sections.append(
+            f"{model_name} Train\n{train_report}\n"
+            f"{model_name} Test\n{test_report}"
+        )
+
+    report_text = "\n\n".join(report_sections)
 
     plt.figure(figsize=(12, 10))
     plt.text(
         0.01,
         0.99,
         report_text,
-        ha="left",
-        va="top",
         family="monospace",
         fontsize=10,
+        va="top",
     )
     plt.axis("off")
     plt.tight_layout()
-    plt.savefig(RESULTS_DIR / "classification_report.png")
-    plt.close() 
+    plt.savefig(output_path, bbox_inches="tight")
+    plt.close()
+
 
 def feature_importance_plot(
     model: RandomForestClassifier,
     x_data: pd.DataFrame,
-    output_pth: Path,
+    output_path: Path,
 ) -> None:
     """
     Save feature importance plot.
@@ -462,11 +527,13 @@ def feature_importance_plot(
     Args:
         model: Trained random forest model.
         x_data: Feature dataframe used for training.
-        output_pth: Path where the plot will be saved.
+        output_path: Path where the plot will be saved.
 
     Returns:
         None.
     """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     importances = pd.Series(
         model.feature_importances_,
         index=x_data.columns,
@@ -483,15 +550,53 @@ def feature_importance_plot(
     plt.xlabel("Importance")
     plt.ylabel("Feature")
     plt.tight_layout()
-    plt.savefig(output_pth)
-    plt.close()   
+    plt.savefig(output_path)
+    plt.close()
+
+
+def plot_roc_curves(
+    models: dict[str, object],
+    x_test: pd.DataFrame,
+    y_test: pd.Series,
+    output_path: Path,
+) -> None:
+    """
+    Save ROC curves for trained classification models.
+
+    Args:
+        models: Dictionary mapping model display names to fitted classifiers.
+        x_test: Testing feature dataframe.
+        y_test: Testing target labels.
+        output_path: Path where the ROC curve image will be saved.
+
+    Returns:
+        None.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    _, axis = plt.subplots(figsize=(10, 6))
+
+    for model_name, model in models.items():
+        RocCurveDisplay.from_estimator(
+            model,
+            x_test,
+            y_test,
+            name=model_name,
+            ax=axis,
+        )
+
+    axis.set_title("ROC Curves")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+
 
 def train_models(
     x_train: pd.DataFrame,
     x_test: pd.DataFrame,
     y_train: pd.Series,
     y_test: pd.Series,
-) -> None:
+) -> dict[str, object]:
     """
     Train classification models, save trained models, and save evaluation outputs.
 
@@ -502,7 +607,7 @@ def train_models(
         y_test: Testing target labels.
 
     Returns:
-        None.
+        Dictionary containing the trained models.
     """
     create_output_directories()
 
@@ -532,10 +637,17 @@ def train_models(
     classification_report_image(
         y_train,
         y_test,
-        y_train_preds_lr,
-        y_train_preds_rf,
-        y_test_preds_lr,
-        y_test_preds_rf,
+        {
+            "Logistic Regression": {
+                "train": y_train_preds_lr,
+                "test": y_test_preds_lr,
+            },
+            "Random Forest": {
+                "train": y_train_preds_rf,
+                "test": y_test_preds_rf,
+            },
+        },
+        RESULTS_DIR / "classification_report.png",
     )
 
     feature_importance_plot(
@@ -544,37 +656,68 @@ def train_models(
         RESULTS_DIR / "feature_importance.png",
     )
 
-    plt.figure(figsize=(10, 6))
-
-    RocCurveDisplay.from_estimator(
-        logistic_model,
+    plot_roc_curves(
+        {
+            "Logistic Regression": logistic_model,
+            "Random Forest": random_forest_model,
+        },
         x_test,
         y_test,
-        name="Logistic Regression",
+        RESULTS_DIR / "roc_curves.png",
     )
 
-    RocCurveDisplay.from_estimator(
-        random_forest_model,
-        x_test,
-        y_test,
-        name="Random Forest",
-        ax=plt.gca(),
+    return {
+        "logistic_model": logistic_model,
+        "random_forest_model": random_forest_model,
+    }
+
+
+def main() -> None:
+    """Run the full churn prediction pipeline."""
+    configure_environment()
+
+    df = import_data(DATA_PATH)
+    df = standardize_missing_values(df)
+    df = add_churn_column(df)
+
+    train_df, test_df = split_data(df, response="churn")
+
+    perform_eda(train_df)
+
+    fill_values = fit_missing_value_imputer(train_df)
+    train_df = apply_missing_value_imputer(train_df, fill_values)
+    test_df = apply_missing_value_imputer(test_df, fill_values)
+
+    encodings, global_mean = fit_target_encoder(
+        train_df,
+        CATEGORICAL_COLUMNS,
+        response="churn",
     )
 
-    plt.title("ROC Curves")
-    plt.tight_layout()
-    plt.savefig(RESULTS_DIR / "roc_curves.png")
-    plt.close()            
+    train_df = apply_target_encoder(
+        train_df,
+        encodings,
+        CATEGORICAL_COLUMNS,
+        response="churn",
+        global_mean=global_mean,
+    )
+
+    test_df = apply_target_encoder(
+        test_df,
+        encodings,
+        CATEGORICAL_COLUMNS,
+        response="churn",
+        global_mean=global_mean,
+    )
+
+    x_train, x_test, y_train, y_test = perform_feature_engineering(
+        train_df,
+        test_df,
+        response="churn",
+    )
+
+    train_models(x_train, x_test, y_train, y_test)
 
 
-
-
-
-
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    main()
